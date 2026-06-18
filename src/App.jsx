@@ -99,7 +99,7 @@ const TABS = [
   {key:"home",icon:"◇",label:"Home"},
   {key:"studio",icon:"⬡",label:"Studio"},
   {key:"library",icon:"▤",label:"Library"},
-  {key:"revenue",icon:"◎",label:"Revenue"},
+  {key:"guide",icon:"📖",label:"Guide"},
   {key:"settings",icon:"⚙",label:"Settings"},
 ];
 const STUDIO_SUBS = [
@@ -1056,15 +1056,186 @@ JSON:{"imagePrompt":"300語の詳細な英語プロンプト。プロの装丁�
     </>;
   }
 
-  /* ═══ REVENUE ═══ */
-  function RevenueView(){const totalVols=(proj?.volumes||[]).length||0;
-    const [v,setV]=useState({vols:totalVols||5,rpd:10,ppv:220,rate:0.5,ds:20,price:500});
-    useEffect(()=>{if(totalVols>0)setV(p=>({...p,vols:totalVols}));},[totalVols]);
-    const kenp=v.vols*v.rpd*30*v.ppv*v.rate;const sales=v.ds*(v.price*0.7)*v.vols;const total=kenp+sales;
-    return <><Card><Label color={T.w}>revenue</Label><H>収益シミュレーター</H>
-      {proj&&<div style={{fontSize:12,color:T.t3,marginBottom:14}}>「{proj.title}」{totalVols}巻を自動反映</div>}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[{k:"vols",l:"巻数"},{k:"rpd",l:"KU既読/日/巻"},{k:"ppv",l:"KENP/巻"},{k:"rate",l:"レート(円)"},{k:"ds",l:"直接購入/月/巻"},{k:"price",l:"価格(円)"}].map(f=><label key={f.k} style={{fontSize:12,color:T.t3,fontFamily:T.mono}}>{f.l}<Input type="number" value={v[f.k]} onChange={e=>setV(p=>({...p,[f.k]:parseFloat(e.target.value)||0}))} style={{marginTop:6,fontFamily:T.mono}}/></label>)}</div></Card>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>{[{l:"KU",val:kenp,c:T.ok},{l:"購入",val:sales,c:T.p},{l:"合計",val:total,c:T.w}].map((r,i)=><Card key={i} style={{textAlign:"center",padding:"18px 10px"}}><div style={{fontSize:10,color:T.t3}}>{r.l}</div><div style={{fontFamily:T.mono,fontSize:22,fontWeight:900,color:r.c,margin:"6px 0"}}>¥{Math.round(r.val).toLocaleString()}</div><div style={{fontSize:10,color:T.t3}}>/月</div></Card>)}</div></>;
+  /* ═══ GUIDE ═══ */
+  function GuideView(){
+    const [openSection,setOpenSection]=useState(null);
+    const toggle=(k)=>setOpenSection(openSection===k?null:k);
+    const Section=({id,num,title,color,children})=>(
+      <Card style={{cursor:"pointer",borderLeft:`3px solid ${color}`}} onClick={()=>toggle(id)}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontFamily:T.mono,fontSize:13,fontWeight:900,color,background:color+"18",width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:8}}>{num}</span>
+            <span style={{fontSize:15,fontWeight:700,color:T.tx}}>{title}</span>
+          </div>
+          <span style={{color:T.t3,fontSize:16,transform:openSection===id?"rotate(180deg)":"rotate(0)",transition:"transform 0.2s"}}>▾</span>
+        </div>
+        {openSection===id&&<div onClick={e=>e.stopPropagation()} style={{marginTop:16,fontSize:13,color:T.t2,lineHeight:2}}>{children}</div>}
+      </Card>
+    );
+    const Step=({children,tool})=>(
+      <div style={{display:"flex",gap:10,padding:"6px 0"}}>
+        <span style={{color:T.ok,flexShrink:0}}>▸</span>
+        <div style={{flex:1}}>{children}{tool&&<span style={{fontFamily:T.mono,fontSize:11,color:T.p,marginLeft:6,background:T.p+"15",padding:"1px 8px",borderRadius:4}}>{tool}</span>}</div>
+      </div>
+    );
+
+    return <>
+      <Card glow={T.p+"20"}>
+        <Label color={T.p}>vessel studio — complete guide</Label>
+        <H>制作ワークフロー 完全ガイド</H>
+        <div style={{fontSize:13,color:T.t2,lineHeight:1.7,marginTop:8}}>
+          小説の執筆からKDP出版まで、全工程の手順を解説します。<br/>各セクションをタップして詳細を表示。
+        </div>
+      </Card>
+
+      <Section id="setup" num="0" title="初期設定" color={T.w}>
+        <Step tool="Settings">Settingsタブを開く</Step>
+        <Step tool="Settings">Anthropic APIキーを入力して保存（必須 — 小説生成等に使用）</Step>
+        <Step>取得先: <a href="https://console.anthropic.com/settings/keys" target="_blank" style={{color:T.p}}>console.anthropic.com/settings/keys</a></Step>
+        <Step tool="Settings">OpenAI APIキーを入力して保存（表紙の文字入れに使用）</Step>
+        <Step>取得先: <a href="https://platform.openai.com/api-keys" target="_blank" style={{color:T.p}}>platform.openai.com/api-keys</a></Step>
+        <Step>OpenAIは事前チャージ制（$5〜）。Billing → Add to balanceでチャージ</Step>
+      </Section>
+
+      <Section id="project" num="1" title="プロジェクト作成" color={T.p}>
+        <Step tool="Home">Homeタブで「AIに提案させる」を選択</Step>
+        <Step tool="Home">ジャンルを選び、コンセプトを入力（空欄でもOK）</Step>
+        <Step tool="Home">「AIに企画を提案させる」ボタン → タイトル・キャラ5人・プロット・章構成が一括生成される</Step>
+        <Step tool="Studio">自動でStudioタブに移動。キャラの✎ボタンで名前・設定を修正可能</Step>
+        <Step tool="Studio">章構成の✎ボタンで各章のあらすじを修正可能</Step>
+        <div style={{padding:10,background:T.ok+"10",borderRadius:8,marginTop:8,fontSize:12,color:T.ok}}>
+          💡 「手動入力」でタイトルとジャンルだけ入力し、キャラと章構成は後からAI生成することも可能
+        </div>
+      </Section>
+
+      <Section id="novel" num="2" title="小説の自動生成" color="#a78bfa">
+        <Step tool="Studio → Novel">Studioタブ → Novelサブタブを開く</Step>
+        <Step tool="Novel">生成したい巻を選択</Step>
+        <Step tool="Novel">「第○巻を自動生成」ボタンを押す</Step>
+        <Step>7章を順番に自動生成。1章ごとに自動保存されます</Step>
+        <Step>所要時間：約15〜25分 / 巻（他のタブに移動しても処理は続きます）</Step>
+        <Step>途中でPCを閉じても、次回「▶ 再開」ボタンで続きから生成できます</Step>
+        <Step tool="Novel">完成後「Download .txt」でテキストファイルを取得</Step>
+        <Step tool="Novel">「全文を読む」ボタンでアプリ内プレビューも可能</Step>
+        <div style={{padding:10,background:T.w+"10",borderRadius:8,marginTop:8,fontSize:12,color:T.w}}>
+          ⚠ 「最初から再生成」を押すと既存テキストが上書きされます（確認ダイアログあり）
+        </div>
+        <div style={{padding:10,background:T.p+"10",borderRadius:8,marginTop:6,fontSize:12,color:T.p}}>
+          💰 APIコスト目安：約$1.25（約190円）/ 巻（約7万文字）
+        </div>
+      </Section>
+
+      <Section id="char_illust" num="3" title="キャラクターイラスト作成（シリーズ初回のみ）" color={T.sc}>
+        <Step tool="Studio → Cover">CoverサブタブでNovel AI用プロンプトを生成</Step>
+        <Step tool="Novel AI">プロンプトをNovel AIにコピペしてキャラクターの基準画像を生成</Step>
+        <Step tool="Novel AI">生成した画像をVibe Transferの参照画像に設定</Step>
+        <Step>以降、この参照画像を使うことで全てのイラストでキャラの顔が統一されます</Step>
+        <div style={{padding:10,background:T.sc+"10",borderRadius:8,marginTop:8,fontSize:12,color:T.sc}}>
+          💡 Vibe Transferとは：参照画像の見た目を新しい画像に反映する機能。強度0.3〜0.7が最適
+        </div>
+      </Section>
+
+      <Section id="novel_cover" num="4" title="小説表紙の作成" color="#a78bfa">
+        <div style={{fontSize:12,color:T.t3,marginBottom:8,fontStyle:"italic"}}>Novel AIの高品質イラスト ＋ GPT Image 2の文字精度 を組み合わせます</div>
+        <Step tool="Studio → Cover">Coverサブタブ → 「🎨 小説表紙」を選択</Step>
+        <Step tool="Cover">Step 1「Novel AI用プロンプトを生成」→ コピー</Step>
+        <Step tool="Novel AI">Novel AIでVibe Transferを使って表紙イラストを生成（文字なし）</Step>
+        <Step tool="Cover">Step 2で画像をアップロード → タイトルを確認</Step>
+        <Step tool="Cover">「GPT Image 2でタイトルを追加」ボタン → 文字入り表紙が完成</Step>
+        <Step tool="Cover">ダウンロードしてKDP用に使用（推奨サイズ: 1600×2560にアップスケール）</Step>
+        <div style={{padding:10,background:T.p+"10",borderRadius:8,marginTop:8,fontSize:12,color:T.p}}>
+          💰 表紙1枚のコスト：約$0.17（約25円）
+        </div>
+      </Section>
+
+      <Section id="manga_gen" num="5" title="漫画の生成" color={T.sc}>
+        <div style={{fontWeight:700,color:T.tx,marginBottom:8}}>5-A. プロンプト生成</div>
+        <Step tool="Studio → Manga">Mangaサブタブ → 「① プロンプト生成」</Step>
+        <Step tool="Manga">巻を選んで「漫画プロンプトを生成」→ 全ページ分のコマ割り・プロンプト・セリフ・効果音が一括で出力</Step>
+        <Step>出力内容：キャラシート / ページごとのコマ構成 / 各コマのNovel AIプロンプト / セリフ / SFX</Step>
+
+        <div style={{fontWeight:700,color:T.tx,marginBottom:8,marginTop:16}}>5-B. 画像生成（Novel AI）</div>
+        <Step tool="Novel AI">各コマのプロンプトをコピーしてNovel AIで画像生成</Step>
+        <Step tool="Novel AI">Vibe Transferで同じキャラ参照画像を使うこと（キャラ統一のため）</Step>
+        <Step>全コマ分の画像を保存しておく</Step>
+
+        <div style={{fontWeight:700,color:T.tx,marginBottom:8,marginTop:16}}>5-C. 画像アップロード</div>
+        <Step tool="Manga">「② 画像アップロード」タブで各コマの画像をアップロード</Step>
+        <Step>進捗バーで何コマ完了したか確認</Step>
+
+        <div style={{fontWeight:700,color:T.tx,marginBottom:8,marginTop:16}}>5-D. ページ生成（自動）</div>
+        <Step tool="Manga">「③ ページ生成」タブ →「⚡ 全ページを一括生成」</Step>
+        <Step>VESSEL Studioが自動で処理する内容：</Step>
+        <div style={{paddingLeft:20,fontSize:12,color:T.t2}}>
+          ・コマを指定サイズで自動レイアウト（large=横幅100%, small=2つ並び）<br/>
+          ・吹き出しを話者の位置に自動配置<br/>
+          ・セリフを縦書きで描画<br/>
+          ・効果音（SFX）を太字で配置<br/>
+          ・コマ枠線を描画<br/>
+          ・完成ページ画像（1200×1800px）を出力
+        </div>
+        <Step>各ページのプレビューを確認 → ダウンロード</Step>
+      </Section>
+
+      <Section id="manga_cover" num="6" title="漫画表紙の作成" color={T.sc}>
+        <Step tool="Studio → Cover">Coverサブタブ →「◈ 漫画表紙」を選択</Step>
+        <Step tool="Cover">Step 1「Novel AI用プロンプトを生成」→ モノクロ漫画スタイルのプロンプトをコピー</Step>
+        <Step tool="Novel AI">Novel AIでVibe Transferを使って漫画表紙イラストを生成（文字なし）</Step>
+        <Step tool="Cover">Step 2で画像をアップロード → タイトル文字を追加</Step>
+        <Step>または「GPT Image 2で漫画表紙を生成」で一括自動生成も可能</Step>
+      </Section>
+
+      <Section id="kdp" num="7" title="KDP入稿データの生成" color={T.w}>
+        <Step tool="Studio → KDP">KDPサブタブを開く</Step>
+        <Step tool="KDP">巻を選んでボタンを押す → 全入稿項目が一括生成</Step>
+        <Step>生成される項目：タイトル / フリガナ / ローマ字 / サブタイトル / シリーズ名 / 内容紹介（A/Bテスト2パターン） / キーワード7つ / カテゴリー3つ / 価格 / ロイヤリティ</Step>
+        <Step>各項目の「copy」ボタンでKDPの入力画面にそのまま貼り付け</Step>
+        <Step>キーワードはタップでコピー</Step>
+        <div style={{padding:10,background:T.w+"10",borderRadius:8,marginTop:8,fontSize:12,color:T.w}}>
+          ⚠ KDPの「AI生成コンテンツ」の開示申告を忘れずに
+        </div>
+      </Section>
+
+      <Section id="xpost" num="8" title="X投稿文の生成" color="#60a5fa">
+        <Step tool="Studio → X Post">X Postサブタブを開く</Step>
+        <Step tool="X Post">「15投稿を生成」ボタン → 5カテゴリ×3パターンが一括生成</Step>
+        <Step>カテゴリ：新刊告知 / キャラなりきり / 設定ネタ / アンケート / 制作裏話</Step>
+        <Step>各投稿の「copy」ボタンでXにそのまま貼り付け</Step>
+        <div style={{padding:10,background:T.p+"10",borderRadius:8,marginTop:8,fontSize:12,color:T.p}}>
+          💡 発売2〜3ヶ月前からアカウントを育て始めると、発売日の初動が良くなります
+        </div>
+      </Section>
+
+      <Section id="publish" num="9" title="KDPへの出版" color={T.ok}>
+        <Step>kdp.amazon.co.jp にログイン</Step>
+        <Step>「電子書籍」→「新しい電子書籍を作成」</Step>
+        <Step>VESSEL Studioで生成したKDPメタデータを各欄にコピペ</Step>
+        <Step>原稿ファイル（.txt or .epub）をアップロード</Step>
+        <Step>表紙画像をアップロード（推奨: 1600×2560px）</Step>
+        <Step>KDPセレクト（Kindle Unlimited）に登録 → 読み放題からの収入を得る</Step>
+        <Step>「AI生成コンテンツ」の開示に✓を入れる</Step>
+        <Step>出版ボタンを押す → 24〜72時間で審査完了・公開</Step>
+      </Section>
+
+      <Section id="library" num="10" title="生成コンテンツの管理" color={T.p}>
+        <Step tool="Library">Libraryタブで全プロジェクトの生成済みコンテンツを横断表示</Step>
+        <Step>検索バーでプロジェクト名・巻タイトルを検索</Step>
+        <Step>フィルター（小説/KDP/漫画/表紙/X投稿）で絞り込み</Step>
+        <Step>カードをタップ → フルスクリーンプレビュー</Step>
+        <Step>プレビュー画面からダウンロード・コピーが可能</Step>
+      </Section>
+
+      <Card style={{background:`${T.ok}08`,border:`1px solid ${T.ok}25`}}>
+        <Label color={T.ok}>cost summary — 1冊あたりのコスト</Label>
+        <div style={{fontSize:13,color:T.t2,lineHeight:2}}>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.bd}`}}><span>小説生成（約7万文字）</span><span style={{fontFamily:T.mono,color:T.ok}}>約190円</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.bd}`}}><span>KDP + 漫画 + X投稿</span><span style={{fontFamily:T.mono,color:T.ok}}>約20円</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.bd}`}}><span>表紙画像（文字入れ）</span><span style={{fontFamily:T.mono,color:T.ok}}>約25円/枚</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.bd}`}}><span>Novel AI（漫画+表紙イラスト）</span><span style={{fontFamily:T.mono,color:T.ok}}>月額$25固定</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontWeight:700}}><span style={{color:T.tx}}>1冊トータル（APIのみ）</span><span style={{fontFamily:T.mono,color:T.w}}>約260円</span></div>
+        </div>
+      </Card>
+    </>;
   }
 
   /* ═══ SETTINGS ═══ */
@@ -1093,7 +1264,7 @@ JSON:{"imagePrompt":"300語の詳細な英語プロンプト。プロの装丁�
   }
 
   /* ═══ RENDER ═══ */
-  const views={home:HomeView,studio:StudioView,library:LibraryView,revenue:RevenueView,settings:SettingsView};
+  const views={home:HomeView,studio:StudioView,library:LibraryView,guide:GuideView,settings:SettingsView};
   const View=views[tab];
 
   return <div style={{minHeight:"100vh",background:T.bg,color:T.tx,fontFamily:T.body,paddingBottom:80}}>
