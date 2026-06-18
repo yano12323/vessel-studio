@@ -71,7 +71,7 @@ function sGetRaw(k) { try { return localStorage.getItem(k) || ""; } catch { retu
 function sSetRaw(k, v) { try { localStorage.setItem(k, v); } catch (e) { console.error(e); } }
 
 /* ═══ Defaults ═══ */
-const BLANK = { id: 0, title: "", author: "", genre: "異世界ラブコメ", targetLength: 70000, characters: [], volumes: [], generatedTexts: {}, kdpMeta: {}, mangaPrompts: {}, coverImages: {}, xPosts: {}, volumeStatus: {} };
+const BLANK = { id: 0, title: "", author: "", genre: "異世界ラブコメ", targetLength: 70000, characters: [], volumes: [], generatedTexts: {}, kdpMeta: {}, mangaPrompts: {}, coverImages: {}, charaImages: {}, charaPrompts: {}, xPosts: {}, volumeStatus: {} };
 const GENRES = ["異世界ラブコメ","異世界ファンタジー","現代ラブコメ","アクション/バトル","コメディ","歴史","ミステリー","ホラー","SF","恋愛（一般）","BL","ダークファンタジー"];
 
 /* ═══ Design ═══ */
@@ -103,7 +103,7 @@ const TABS = [
   {key:"settings",icon:"⚙",label:"Settings"},
 ];
 const STUDIO_SUBS = [
-  {key:"novel",label:"Novel"},{key:"kdp",label:"KDP"},{key:"manga",label:"Manga"},{key:"cover",label:"Cover"},{key:"xpost",label:"X Post"},
+  {key:"novel",label:"Novel"},{key:"chara",label:"Chara"},{key:"kdp",label:"KDP"},{key:"manga",label:"Manga"},{key:"cover",label:"Cover"},{key:"xpost",label:"X Post"},
 ];
 
 /* ═══════ MAIN APP ═══════ */
@@ -245,7 +245,7 @@ export default function App() {
       <div style={{display:"flex",gap:4,marginBottom:16,overflowX:"auto",paddingBottom:4}}>
         {STUDIO_SUBS.map(s=>{
           const active=studioSub===s.key;
-          const hasContent=s.key==="novel"?Object.keys(proj.generatedTexts||{}).length>0:s.key==="kdp"?Object.keys(proj.kdpMeta||{}).length>0:s.key==="manga"?Object.keys(proj.mangaPrompts||{}).length>0:s.key==="cover"?Object.keys(proj.coverImages||{}).length>0:s.key==="xpost"?proj.xPosts&&Object.keys(proj.xPosts).length>0:false;
+          const hasContent=s.key==="novel"?Object.keys(proj.generatedTexts||{}).length>0:s.key==="chara"?Object.keys(proj.charaImages||{}).length>0:s.key==="kdp"?Object.keys(proj.kdpMeta||{}).length>0:s.key==="manga"?Object.keys(proj.mangaPrompts||{}).length>0:s.key==="cover"?Object.keys(proj.coverImages||{}).length>0:s.key==="xpost"?proj.xPosts&&Object.keys(proj.xPosts).length>0:false;
           return <button key={s.key} onClick={()=>setStudioSub(s.key)} style={{padding:"9px 18px",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",transition:"all 0.15s",whiteSpace:"nowrap",background:active?T.p+"20":"transparent",color:active?T.p:T.t3,border:`1px solid ${active?T.p+"40":T.bd}`,position:"relative"}}>
             {s.label}
             {hasContent&&<span style={{position:"absolute",top:4,right:4,width:6,height:6,borderRadius:"50%",background:T.ok}}/>}
@@ -253,6 +253,7 @@ export default function App() {
         })}
       </div>
       {studioSub==="novel"&&<NovelSub/>}
+      {studioSub==="chara"&&<CharaSub/>}
       {studioSub==="kdp"&&<KdpSub/>}
       {studioSub==="manga"&&<MangaSub/>}
       {studioSub==="cover"&&<CoverSub/>}
@@ -348,6 +349,166 @@ export default function App() {
 
         {isGenThis?<><Loader msg="生成中..."/><div style={{background:T.bg,borderRadius:10,padding:12,maxHeight:200,overflowY:"auto",marginTop:8,border:`1px solid ${T.bd}`}}>{genLog.map((l,i)=><div key={i} style={{fontFamily:T.mono,fontSize:12,color:T.t2,lineHeight:2}}>{l}</div>)}</div><Btn v="danger" style={{marginTop:10,fontSize:12}} onClick={()=>{genAbort.current=true;}}>中断</Btn></>
         :<Btn onClick={()=>gen(false)} disabled={genStatus==="run"||!keysOk}>{txt?(isComplete?"最初から再生成":"最初から生成し直す"):`第${vol.num}巻を自動生成`}</Btn>}
+      </Card>}
+    </>;
+  }
+
+  /* ─── Chara Sub (Character Illustration) ─── */
+  function CharaSub(){
+    const [ld,setLd]=useState("");
+    const [prompts,setPrompts]=useState(proj.charaPrompts||{});
+    const [images,setImages]=useState(proj.charaImages||{});
+    const chars=proj.characters||[];
+
+    // Generate Novel AI prompts for all characters
+    const genAllPrompts=async()=>{
+      if(chars.length===0){alert("先にNovelタブでキャラクターを作成してください");return;}
+      setLd("キャラクタープロンプト生成中...");
+      try{
+        const charList=chars.map(c=>`${c.name}(${c.role}): ${c.desc}`).join("\n");
+        const r=await claude("キャラクターデザイン＋AI画像生成専門家。JSONのみ。バッククォート不要。",
+          `以下のキャラクターそれぞれについて、Novel AIで生成するための詳細プロンプトを作成してください。
+全プロンプトに「no text, no title, no watermark, high quality, detailed」を含めてください。
+
+【タイトル】${proj.title}
+【ジャンル】${proj.genre}
+【キャラクター】
+${charList}
+
+JSON形式で返してください：
+{
+  "characters": [
+    {
+      "name": "キャラ名",
+      "fullBody": "全身イラスト用プロンプト（タグ形式）。1girl/1boyで始める。服装・髪型・目の色・体型を詳細に。simple background, white background含む",
+      "faceCloseup": "顔アップ用プロンプト。portrait, face focus, upper body含む",
+      "expressions": {
+        "smile": "笑顔プロンプト",
+        "angry": "怒りプロンプト",
+        "sad": "悲しみプロンプト",
+        "surprised": "驚きプロンプト"
+      },
+      "vibeTransferTip": "このキャラのVibe Transfer推奨設定（強度等）"
+    }
+  ]
+}`,4096);
+        const parsed=JSON.parse(r.replace(/```json|```/g,"").trim());
+        const newPrompts={};
+        (parsed.characters||[]).forEach(c=>{newPrompts[c.name]=c;});
+        setPrompts(newPrompts);
+        updateProj({charaPrompts:newPrompts});
+      }catch(e){alert(e.message);}
+      setLd("");
+    };
+
+    // Handle image upload for a character
+    const uploadImage=(charName,type,e)=>{
+      const file=e.target.files[0];if(!file)return;
+      const reader=new FileReader();
+      reader.onload=(ev)=>{
+        const key=`${charName}_${type}`;
+        const newImages={...images,[key]:ev.target.result};
+        setImages(newImages);
+        updateProj({charaImages:newImages});
+      };
+      reader.readAsDataURL(file);
+    };
+
+    return <>
+      <Card glow={T.sc+"20"}>
+        <Label color={T.sc}>character illustrations</Label>
+        <H>キャラクターイラスト管理</H>
+        <div style={{fontSize:13,color:T.t2,lineHeight:1.7,margin:"8px 0 16px"}}>
+          各キャラのNovel AIプロンプトを生成 → Novel AIでイラスト作成 → ここにアップロード。<br/>
+          <span style={{color:T.w,fontWeight:700}}>この画像がVibe Transferの基準になります。表紙・漫画の前に必ず作成してください。</span>
+        </div>
+        {chars.length===0?(
+          <div style={{padding:20,textAlign:"center",color:T.t3,fontSize:13}}>先にNovelタブでキャラクターを作成してください</div>
+        ):(
+          ld?<Loader msg={ld}/>:
+          <Btn onClick={genAllPrompts} disabled={!keysOk} style={{width:"100%",padding:"14px",fontSize:14,background:`linear-gradient(135deg,${T.sc},#ff8c6c)`}}>
+            ⚡ 全キャラのプロンプトを一括生成
+          </Btn>
+        )}
+      </Card>
+
+      {/* Per-character cards */}
+      {chars.map((c,ci)=>{
+        const p=prompts[c.name];
+        const fullImg=images[`${c.name}_full`];
+        const faceImg=images[`${c.name}_face`];
+        return <Card key={ci}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+            <span style={{fontSize:16,fontWeight:800,color:T.tx}}>{c.name}</span>
+            <Pill color={T.sc}>{c.role}</Pill>
+            {(fullImg||faceImg)&&<Pill color={T.ok}>画像あり</Pill>}
+          </div>
+          <div style={{fontSize:12,color:T.t2,marginBottom:12}}>{c.desc}</div>
+
+          {p?<>
+            {/* Full body prompt */}
+            <div style={{marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <span style={{fontFamily:T.mono,fontSize:11,color:T.p,fontWeight:700}}>FULL BODY — 全身</span>
+                <CopyBtn text={toStr(p.fullBody)}/>
+              </div>
+              <Code>{toStr(p.fullBody)}</Code>
+              <div style={{marginTop:8}}>
+                <div style={{fontSize:11,color:T.t3,marginBottom:4}}>Novel AIで生成した全身画像をアップロード（Vibe Transfer基準）</div>
+                <input type="file" accept="image/*" onChange={(e)=>uploadImage(c.name,"full",e)} style={{fontSize:12,color:T.tx}}/>
+                {fullImg&&<div style={{marginTop:8}}><img src={fullImg} alt="" style={{height:200,borderRadius:10,border:`1px solid ${T.bd}`}}/></div>}
+              </div>
+            </div>
+
+            {/* Face closeup prompt */}
+            <div style={{marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <span style={{fontFamily:T.mono,fontSize:11,color:T.sc,fontWeight:700}}>FACE — 顔アップ</span>
+                <CopyBtn text={toStr(p.faceCloseup)}/>
+              </div>
+              <Code>{toStr(p.faceCloseup)}</Code>
+              <div style={{marginTop:8}}>
+                <input type="file" accept="image/*" onChange={(e)=>uploadImage(c.name,"face",e)} style={{fontSize:12,color:T.tx}}/>
+                {faceImg&&<div style={{marginTop:8}}><img src={faceImg} alt="" style={{height:150,borderRadius:10,border:`1px solid ${T.bd}`}}/></div>}
+              </div>
+            </div>
+
+            {/* Expression prompts */}
+            {p.expressions&&<div style={{marginBottom:10}}>
+              <span style={{fontFamily:T.mono,fontSize:11,color:T.w,fontWeight:700}}>EXPRESSIONS — 表情差分</span>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:8}}>
+                {Object.entries(p.expressions).map(([expr,prompt])=>
+                  <div key={expr} style={{background:T.s2,borderRadius:8,padding:10,border:`1px solid ${T.bd}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                      <Pill color={T.w}>{expr}</Pill>
+                      <CopyBtn text={toStr(prompt)}/>
+                    </div>
+                    <div style={{fontFamily:T.mono,fontSize:10,color:T.t2,lineHeight:1.5,wordBreak:"break-all"}}>{toStr(prompt)}</div>
+                  </div>
+                )}
+              </div>
+            </div>}
+
+            {/* Vibe Transfer tip */}
+            {p.vibeTransferTip&&<div style={{padding:10,background:T.p+"10",borderRadius:8,marginTop:8}}>
+              <div style={{fontSize:12,color:T.p,lineHeight:1.6}}>💡 {toStr(p.vibeTransferTip)}</div>
+            </div>}
+          </>:(
+            <div style={{padding:16,textAlign:"center",color:T.t3,fontSize:12,background:T.s2,borderRadius:10}}>
+              上の「⚡ 全キャラのプロンプトを一括生成」でプロンプトが表示されます
+            </div>
+          )}
+        </Card>;
+      })}
+
+      {Object.keys(prompts).length>0&&<Card style={{background:T.ok+"08",border:`1px solid ${T.ok}25`}}>
+        <div style={{fontSize:13,color:T.ok,fontWeight:700,marginBottom:6}}>次のステップ</div>
+        <div style={{fontSize:12,color:T.t2,lineHeight:1.7}}>
+          1. 各プロンプトをNovel AIにコピペしてイラストを生成<br/>
+          2. 全身画像をVibe Transferの参照画像に設定<br/>
+          3. 生成した画像を上のフォームからアップロード<br/>
+          4. 完了したらCoverタブで表紙作成、またはMangaタブで漫画生成へ
+        </div>
       </Card>}
     </>;
   }
