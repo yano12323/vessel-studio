@@ -363,47 +363,436 @@ export default function App() {
   }
 
   /* ─── Manga Sub ─── */
-  function MangaSub(){const [ld,setLd]=useState("");const [data,setData]=useState(null);const [selVol,setSelVol]=useState(1);
-    const gen=async()=>{const txt=proj.generatedTexts?.[String(selVol)];if(!txt){alert("先にNovelで小説を生成してください");return;}setLd("生成中...");try{const cs=(proj.characters||[]).map(c=>`${c.name}(${c.role}):${c.desc}`).join("\n");
-    const r=await claude("漫画原作者。JSONのみ。バッククォート不要。",`小説→漫画。\n【キャラ】\n${cs}\n【テキスト】\n${txt.substring(0,5000)}\n\nJSON:{"characterSheets":[{"name":"","novelaiPrompt":"monochrome greyscale manga tags","expressions":["smile","angry","surprised"]}],"pages":[{"pageNum":1,"panels":[{"panelNum":1,"size":"large","description":"","novelaiPrompt":"tags","dialogue":"","sfx":""}]}]}\n5ページ。`,4096);
-    const d=JSON.parse(r.replace(/```json|```/g,"").trim());setData(d);updateProj({mangaPrompts:{...(proj.mangaPrompts||{}),[String(selVol)]:d}});}catch(e){alert(e.message);}setLd("");};
-    return <><Card><Label color={T.sc}>manga</Label><div style={{display:"flex",gap:8,margin:"12px 0",flexWrap:"wrap"}}>{(proj.volumes||[]).map(v=><Btn key={v.num} v={selVol===v.num?"primary":"ghost"} style={{fontSize:12}} onClick={()=>setSelVol(v.num)}>Vol.{v.num} {proj.generatedTexts?.[String(v.num)]?"✓":"—"}{proj.mangaPrompts?.[String(v.num)]?" 🖼":""}</Btn>)}</div>
-    {ld?<Loader msg={ld}/>:<Btn onClick={gen} disabled={!keysOk}>生成</Btn>}</Card>
-    {data?.characterSheets&&<Card><Label>characters</Label>{data.characterSheets.map((cs,i)=><div key={i} style={{padding:"14px 0",borderBottom:i<data.characterSheets.length-1?`1px solid ${T.bd}`:"none"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontWeight:700,color:T.tx}}>{cs.name}</span><CopyBtn text={cs.novelaiPrompt}/></div><Code>{cs.novelaiPrompt}</Code></div>)}</Card>}
-    {data?.pages&&<Card><Label>pages</Label>{data.pages.map(pg=><div key={pg.pageNum} style={{marginBottom:16}}><div style={{fontFamily:T.mono,color:T.w,fontWeight:700,marginBottom:8}}>P{pg.pageNum}</div>{(pg.panels||[]).map(pn=><div key={pn.panelNum} style={{background:T.s2,borderRadius:10,padding:12,marginBottom:6,border:`1px solid ${T.bd}`}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><div style={{display:"flex",gap:6}}><Pill>{pn.panelNum}</Pill><Pill color={T.t3}>{pn.size}</Pill></div><CopyBtn text={pn.novelaiPrompt}/></div><Code>{pn.novelaiPrompt}</Code>{pn.dialogue&&<div style={{color:T.sc,marginTop:6}}>「{pn.dialogue}」</div>}</div>)}</div>)}</Card>}</>;
+  function MangaSub(){
+    const [ld,setLd]=useState("");
+    const [data,setData]=useState(null);
+    const [selVol,setSelVol]=useState(1);
+    const [panelImages,setPanelImages]=useState({});
+    const [completedPages,setCompletedPages]=useState({});
+    const [activeStep,setActiveStep]=useState("prompts");
+
+    // Generate manga prompts from novel
+    const gen=async()=>{
+      const txt=proj.generatedTexts?.[String(selVol)];
+      if(!txt){alert("先にNovelで小説を生成してください");return;}
+      setLd("漫画プロンプト生成中...");
+      try{
+        const cs=(proj.characters||[]).map(c=>`${c.name}(${c.role}):${c.desc}`).join("\n");
+        const r=await claude("漫画原作者兼レイアウト専門家。JSONのみ。バッククォート不要。",
+          `小説を漫画に変換。各コマにセリフと効果音を必ず含める。
+
+【キャラ】
+${cs}
+
+【小説テキスト（冒頭5000字）】
+${txt.substring(0,5000)}
+
+以下のJSON形式で返してください：
+{
+  "characterSheets":[{"name":"キャラ名","novelaiPrompt":"monochrome, greyscale, manga, screentone, ...タグ形式","expressions":["smile","angry","surprised","sad"]}],
+  "pages":[{
+    "pageNum":1,
+    "panels":[{
+      "panelNum":1,
+      "size":"large",
+      "description":"シーンの説明",
+      "novelaiPrompt":"monochrome, greyscale, manga, screentone, ...タグ形式プロンプト",
+      "dialogue":"セリフ（なければ空文字）",
+      "sfx":"効果音（なければ空文字）",
+      "speakerPosition":"left"
+    }]
+  }]
+}
+
+sizeは large/medium/small のいずれか。
+speakerPositionは left/right/center のいずれか。
+dialogueとsfxは必ず含めること（なければ空文字""）。
+5ページ分、各ページ3〜5コマで生成。`,4096);
+        const d=JSON.parse(r.replace(/```json|```/g,"").trim());
+        setData(d);
+        updateProj({mangaPrompts:{...(proj.mangaPrompts||{}),[String(selVol)]:d}});
+      }catch(e){alert(e.message);}
+      setLd("");
+    };
+
+    // ══ Page Composition Engine ══
+    const PAGE_W=1200;
+    const PAGE_H=1800;
+    const GAP=8;
+    const BORDER=3;
+    const MARGIN=16;
+
+    // Layout algorithm: arrange panels into rows
+    const calcLayout=(panels)=>{
+      const rows=[];
+      let i=0;
+      while(i<panels.length){
+        const p=panels[i];
+        if(p.size==="large"){
+          rows.push([{...p,widthRatio:1}]);
+          i++;
+        }else if(p.size==="small"&&i+1<panels.length&&panels[i+1].size==="small"){
+          rows.push([{...panels[i],widthRatio:0.5},{...panels[i+1],widthRatio:0.5}]);
+          i+=2;
+        }else{
+          rows.push([{...p,widthRatio:1}]);
+          i++;
+        }
+      }
+      return rows;
+    };
+
+    // Draw speech bubble with vertical text
+    const drawBubble=(ctx,x,y,w,h,text,position)=>{
+      if(!text||!text.trim())return;
+      const chars=text.split("");
+      const fontSize=Math.max(Math.round(w/16),14);
+      const lineH=fontSize*1.3;
+      const maxPerCol=Math.floor((h*0.55)/lineH);
+      const cols=Math.ceil(chars.length/maxPerCol);
+      const bW=Math.max(cols*lineH+30,fontSize*2.5);
+      const bH=Math.min(maxPerCol,chars.length)*lineH+24;
+
+      let bx,by;
+      if(position==="right"){bx=x+w-bW-12;by=y+10;}
+      else if(position==="center"){bx=x+(w-bW)/2;by=y+10;}
+      else{bx=x+12;by=y+10;}
+
+      // Bubble shape
+      ctx.fillStyle="rgba(255,255,255,0.95)";
+      ctx.strokeStyle="rgba(0,0,0,0.85)";
+      ctx.lineWidth=2;
+      const cx=bx+bW/2;const cy=by+bH/2;
+      ctx.beginPath();
+      ctx.ellipse(cx,cy,bW/2,bH/2,0,0,Math.PI*2);
+      ctx.fill();ctx.stroke();
+
+      // Tail
+      ctx.fillStyle="rgba(255,255,255,0.95)";
+      ctx.beginPath();
+      const dir=position==="right"?-1:position==="center"?0:1;
+      ctx.moveTo(cx+dir*(bW*0.15),cy+bH*0.35);
+      ctx.lineTo(cx+dir*(bW*0.25),cy+bH*0.5+10);
+      ctx.lineTo(cx+dir*(bW*0.3),cy+bH*0.3);
+      ctx.fill();
+
+      // Vertical text (right to left columns)
+      ctx.fillStyle="rgba(0,0,0,1)";
+      ctx.font=`bold ${fontSize}px 'Noto Sans JP',sans-serif`;
+      ctx.textAlign="center";ctx.textBaseline="middle";
+      let col=0;let row=0;
+      for(let c=0;c<chars.length;c++){
+        const tx=bx+bW-16-col*lineH;
+        const ty=by+16+row*lineH+lineH/2;
+        ctx.fillText(chars[c],tx,ty);
+        row++;
+        if(row>=maxPerCol){row=0;col++;}
+      }
+    };
+
+    // Draw SFX text
+    const drawSfx=(ctx,x,y,w,h,sfx)=>{
+      if(!sfx||!sfx.trim())return;
+      const size=Math.max(Math.round(w/6),20);
+      ctx.font=`900 ${size}px 'Noto Sans JP',sans-serif`;
+      ctx.textAlign="center";
+      ctx.strokeStyle="rgba(255,255,255,0.9)";
+      ctx.lineWidth=Math.max(3,size/6);
+      ctx.strokeText(sfx,x+w/2,y+h-size*0.8);
+      ctx.fillStyle="rgba(0,0,0,0.9)";
+      ctx.fillText(sfx,x+w/2,y+h-size*0.8);
+    };
+
+    // Compose a full manga page
+    const composePage=async(pageNum)=>{
+      const page=data?.pages?.find(p=>p.pageNum===pageNum);
+      if(!page)return;
+
+      const canvas=document.createElement("canvas");
+      canvas.width=PAGE_W;canvas.height=PAGE_H;
+      const ctx=canvas.getContext("2d");
+
+      // White background
+      ctx.fillStyle="#ffffff";
+      ctx.fillRect(0,0,PAGE_W,PAGE_H);
+
+      const rows=calcLayout(page.panels);
+      const usableW=PAGE_W-MARGIN*2;
+      const totalGapH=(rows.length-1)*GAP;
+      const usableH=PAGE_H-MARGIN*2-totalGapH;
+      const rowH=usableH/rows.length;
+
+      let curY=MARGIN;
+
+      for(const row of rows){
+        const rowGapW=(row.length-1)*GAP;
+        let curX=MARGIN;
+
+        for(const panel of row){
+          const pw=usableW*panel.widthRatio-(row.length>1?GAP/2:0);
+          const ph=rowH;
+
+          // Draw panel border
+          ctx.strokeStyle="rgba(0,0,0,1)";
+          ctx.lineWidth=BORDER;
+          ctx.strokeRect(curX,curY,pw,ph);
+
+          // Draw panel image if uploaded
+          const key=`${pageNum}-${panel.panelNum}`;
+          const imgUrl=panelImages[key];
+          if(imgUrl){
+            try{
+              const img=new Image();
+              await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=imgUrl;});
+              // Fit image into panel (cover mode)
+              const imgRatio=img.naturalWidth/img.naturalHeight;
+              const panelRatio=pw/ph;
+              let sx=0,sy=0,sw=img.naturalWidth,sh=img.naturalHeight;
+              if(imgRatio>panelRatio){
+                sw=img.naturalHeight*panelRatio;
+                sx=(img.naturalWidth-sw)/2;
+              }else{
+                sh=img.naturalWidth/panelRatio;
+                sy=(img.naturalHeight-sh)/2;
+              }
+              ctx.drawImage(img,sx,sy,sw,sh,curX+BORDER,curY+BORDER,pw-BORDER*2,ph-BORDER*2);
+            }catch{}
+          }else{
+            // No image - draw placeholder
+            ctx.fillStyle="rgba(240,240,240,1)";
+            ctx.fillRect(curX+BORDER,curY+BORDER,pw-BORDER*2,ph-BORDER*2);
+            ctx.fillStyle="rgba(180,180,180,1)";
+            ctx.font="14px sans-serif";
+            ctx.textAlign="center";
+            ctx.fillText(`コマ${panel.panelNum}（画像未設定）`,curX+pw/2,curY+ph/2);
+          }
+
+          // Add speech bubble
+          drawBubble(ctx,curX,curY,pw,ph,panel.dialogue,panel.speakerPosition||"left");
+
+          // Add SFX
+          drawSfx(ctx,curX,curY,pw,ph,panel.sfx);
+
+          curX+=pw+GAP;
+        }
+        curY+=rowH+GAP;
+      }
+
+      const result=canvas.toDataURL("image/png");
+      setCompletedPages(prev=>({...prev,[String(pageNum)]:result}));
+      return result;
+    };
+
+    // Compose all pages
+    const composeAll=async()=>{
+      if(!data?.pages)return;
+      setLd("全ページを生成中...");
+      for(const page of data.pages){
+        await composePage(page.pageNum);
+      }
+      setLd("");
+    };
+
+    const dlPage=(pageNum)=>{
+      const url=completedPages[String(pageNum)];if(!url)return;
+      const a=document.createElement("a");a.href=url;a.download=`manga_page_${pageNum}.png`;a.click();
+    };
+
+    const dlAll=()=>{
+      Object.entries(completedPages).forEach(([num,url])=>{
+        setTimeout(()=>{const a=document.createElement("a");a.href=url;a.download=`manga_page_${num}.png`;a.click();},parseInt(num)*300);
+      });
+    };
+
+    const totalPanels=data?.pages?.reduce((a,p)=>a+(p.panels?.length||0),0)||0;
+    const uploadedCount=Object.keys(panelImages).length;
+    const completedCount=Object.keys(completedPages).length;
+    const totalPages=data?.pages?.length||0;
+
+    return <>
+      {/* Step tabs */}
+      <div style={{display:"flex",gap:6,marginBottom:14}}>
+        {[
+          {k:"prompts",l:"① プロンプト生成"},
+          {k:"upload",l:`② 画像アップロード (${uploadedCount}/${totalPanels})`},
+          {k:"compose",l:`③ ページ生成 (${completedCount}/${totalPages})`},
+        ].map(s=>
+          <button key={s.k} onClick={()=>setActiveStep(s.k)} style={{flex:1,padding:"10px 4px",borderRadius:10,fontSize:12,fontWeight:700,cursor:"pointer",background:activeStep===s.k?T.sc+"20":"transparent",color:activeStep===s.k?T.sc:T.t3,border:`1px solid ${activeStep===s.k?T.sc+"40":T.bd}`}}>
+            {s.l}
+          </button>
+        )}
+      </div>
+
+      {/* ═══ STEP 1: Prompt Generation ═══ */}
+      {activeStep==="prompts"&&<>
+        <Card><Label color={T.sc}>manga prompts</Label>
+          <div style={{fontSize:13,color:T.t2,lineHeight:1.7,marginBottom:12}}>
+            小説テキストから漫画の全コマ（プロンプト・セリフ・効果音・レイアウト）を一括生成します。
+          </div>
+          <div style={{display:"flex",gap:8,margin:"12px 0",flexWrap:"wrap"}}>
+            {(proj.volumes||[]).map(v=><Btn key={v.num} v={selVol===v.num?"primary":"ghost"} style={{fontSize:12}} onClick={()=>setSelVol(v.num)}>
+              Vol.{v.num} {proj.generatedTexts?.[String(v.num)]?"✓":"—"}
+            </Btn>)}
+          </div>
+          {ld?<Loader msg={ld}/>:<Btn onClick={gen} disabled={!keysOk}>漫画プロンプトを生成</Btn>}
+        </Card>
+
+        {data?.characterSheets&&<Card><Label>character sheets — novel ai</Label>
+          {data.characterSheets.map((cs,i)=>
+            <div key={i} style={{padding:"14px 0",borderBottom:i<data.characterSheets.length-1?`1px solid ${T.bd}`:"none"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                <span style={{fontWeight:700,color:T.tx}}>{cs.name}</span><CopyBtn text={cs.novelaiPrompt}/>
+              </div>
+              <Code>{cs.novelaiPrompt}</Code>
+            </div>
+          )}
+        </Card>}
+
+        {data?.pages&&<Card><Label>pages & panels — プロンプト一覧</Label>
+          {data.pages.map(pg=><div key={pg.pageNum} style={{marginBottom:20}}>
+            <div style={{fontFamily:T.mono,color:T.w,fontWeight:700,marginBottom:8,fontSize:14}}>Page {pg.pageNum} — {pg.panels.length}コマ</div>
+            {(pg.panels||[]).map(pn=>
+              <div key={pn.panelNum} style={{background:T.s2,borderRadius:10,padding:12,marginBottom:6,border:`1px solid ${T.bd}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                  <div style={{display:"flex",gap:6}}><Pill>{pn.panelNum}</Pill><Pill color={T.t3}>{pn.size}</Pill></div>
+                  <CopyBtn text={pn.novelaiPrompt}/>
+                </div>
+                <div style={{fontSize:12,color:T.t2,marginBottom:4}}>{pn.description}</div>
+                <Code>{pn.novelaiPrompt}</Code>
+                {pn.dialogue&&<div style={{color:T.sc,marginTop:8,fontSize:13}}>💬「{pn.dialogue}」</div>}
+                {pn.sfx&&<div style={{color:T.w,marginTop:4,fontSize:12}}>SFX: {pn.sfx}</div>}
+              </div>
+            )}
+          </div>)}
+          <div style={{padding:14,background:T.ok+"10",borderRadius:10,border:`1px solid ${T.ok}30`,marginTop:8}}>
+            <div style={{fontSize:13,color:T.ok,fontWeight:700}}>次のステップ</div>
+            <div style={{fontSize:12,color:T.t2,marginTop:4,lineHeight:1.6}}>
+              各コマのプロンプトをNovel AIにコピペして画像を生成 → 「② 画像アップロード」タブへ
+            </div>
+          </div>
+        </Card>}
+      </>}
+
+      {/* ═══ STEP 2: Upload Panel Images ═══ */}
+      {activeStep==="upload"&&<>
+        {!data?<Card style={{textAlign:"center",padding:40}}><div style={{color:T.t3}}>先に「① プロンプト生成」を実行してください</div></Card>:<>
+          <Card>
+            <Label color={T.w}>panel images — アップロード</Label>
+            <div style={{fontSize:13,color:T.t2,lineHeight:1.7,marginBottom:14}}>
+              Novel AIで生成した各コマの画像をアップロードしてください。<br/>
+              全コマアップロード後「③ ページ生成」で完成ページが出力されます。
+            </div>
+            <div style={{display:"flex",gap:3,marginBottom:8}}>
+              {Array.from({length:totalPanels}).map((_,i)=>
+                <div key={i} style={{flex:1,height:6,borderRadius:99,background:i<uploadedCount?T.w:T.s2}}/>
+              )}
+            </div>
+            <div style={{fontSize:12,color:T.t3}}>{uploadedCount}/{totalPanels}コマ アップロード済み</div>
+          </Card>
+
+          {data.pages.map(pg=><Card key={pg.pageNum}>
+            <Label color={T.w}>page {pg.pageNum}</Label>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {(pg.panels||[]).map(pn=>{
+                const key=`${pg.pageNum}-${pn.panelNum}`;
+                const uploaded=panelImages[key];
+                return <div key={pn.panelNum} style={{background:T.s2,borderRadius:10,padding:12,border:`1px solid ${uploaded?T.ok+"40":T.bd}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                    <div style={{display:"flex",gap:6}}>
+                      <Pill>{pn.panelNum}</Pill><Pill color={T.t3}>{pn.size}</Pill>
+                      {uploaded&&<Pill color={T.ok}>✓</Pill>}
+                    </div>
+                  </div>
+                  {pn.dialogue&&<div style={{fontSize:12,color:T.sc,marginBottom:6}}>💬「{pn.dialogue}」</div>}
+                  <input type="file" accept="image/*" onChange={e=>{
+                    const file=e.target.files[0];if(!file)return;
+                    const reader=new FileReader();
+                    reader.onload=ev=>setPanelImages(prev=>({...prev,[key]:ev.target.result}));
+                    reader.readAsDataURL(file);
+                  }} style={{fontSize:12,color:T.tx}}/>
+                  {uploaded&&<div style={{marginTop:8}}><img src={uploaded} alt="" style={{width:"100%",maxHeight:200,objectFit:"contain",borderRadius:8,border:`1px solid ${T.bd}`}}/></div>}
+                </div>;
+              })}
+            </div>
+          </Card>)}
+
+          {uploadedCount>0&&<Card style={{background:T.ok+"10",border:`1px solid ${T.ok}30`}}>
+            <div style={{fontSize:13,color:T.ok,fontWeight:700}}>次のステップ</div>
+            <div style={{fontSize:12,color:T.t2,marginTop:4}}>「③ ページ生成」タブで完成ページを自動生成できます</div>
+          </Card>}
+        </>}
+      </>}
+
+      {/* ═══ STEP 3: Page Composition ═══ */}
+      {activeStep==="compose"&&<>
+        {!data?<Card style={{textAlign:"center",padding:40}}><div style={{color:T.t3}}>先に「① プロンプト生成」を実行してください</div></Card>:<>
+          <Card>
+            <Label color={T.ok}>page composition — ページ自動生成</Label>
+            <div style={{fontSize:13,color:T.t2,lineHeight:1.7,marginBottom:14}}>
+              アップロードしたコマ画像を自動レイアウトし、吹き出し・セリフ・効果音を配置した完成ページを出力します。
+            </div>
+            {uploadedCount===0&&<div style={{padding:14,background:T.w+"10",borderRadius:10,border:`1px solid ${T.w}30`,marginBottom:14}}>
+              <div style={{fontSize:13,color:T.w}}>⚠ まだ画像がアップロードされていません。「② 画像アップロード」で画像を追加してください。</div>
+            </div>}
+
+            {ld?<Loader msg={ld}/>:
+              <div style={{display:"flex",gap:8}}>
+                <Btn onClick={composeAll} v="success" style={{flex:1,padding:"14px",fontSize:14}}>
+                  ⚡ 全{totalPages}ページを一括生成
+                </Btn>
+                {completedCount>0&&<Btn onClick={dlAll} v="secondary" style={{fontSize:12,padding:"14px"}}>全DL</Btn>}
+              </div>
+            }
+          </Card>
+
+          {/* Completed pages preview */}
+          {data.pages.map(pg=>{
+            const pageImg=completedPages[String(pg.pageNum)];
+            return <Card key={pg.pageNum}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <Label color={pageImg?T.ok:T.t3}>page {pg.pageNum} {pageImg?"— ✓ 完成":""}</Label>
+                <div style={{display:"flex",gap:6}}>
+                  {!ld&&<Btn v="ghost" style={{fontSize:11,padding:"6px 12px"}} onClick={()=>composePage(pg.pageNum)}>
+                    {pageImg?"再生成":"生成"}
+                  </Btn>}
+                  {pageImg&&<Btn v="success" style={{fontSize:11,padding:"6px 12px"}} onClick={()=>dlPage(pg.pageNum)}>DL</Btn>}
+                </div>
+              </div>
+              {pageImg?
+                <img src={pageImg} alt={`Page ${pg.pageNum}`} style={{width:"100%",borderRadius:10,border:`1px solid ${T.bd}`}}/>
+              :
+                <div style={{padding:30,textAlign:"center",background:T.s2,borderRadius:10,border:`1px solid ${T.bd}`}}>
+                  <div style={{color:T.t3,fontSize:13}}>
+                    {uploadedCount>0?"「生成」ボタンで作成":"画像をアップロード後に生成できます"}
+                  </div>
+                  <div style={{fontSize:12,color:T.t3,marginTop:8}}>
+                    {pg.panels.map(pn=>`コマ${pn.panelNum}(${pn.size})`).join(" / ")}
+                  </div>
+                </div>
+              }
+            </Card>;
+          })}
+        </>}
+      </>}
+    </>;
   }
 
   /* ─── Cover Sub ─── */
   function CoverSub(){
     const [ld,setLd]=useState("");
-    const [sec,setSec]=useState("novel"); // novel | manga
-    const [uploadedImg,setUploadedImg]=useState(null); // base64 data URL of uploaded Novel AI image
+    const [sec,setSec]=useState("novel");
+    const [uploadedImg,setUploadedImg]=useState(null);
     const [finalImg,setFinalImg]=useState(proj.coverImages?.novel||null);
     const [mangaFinalImg,setMangaFinalImg]=useState(proj.coverImages?.manga||null);
     const [naiPrompt,setNaiPrompt]=useState("");
     const [titleText,setTitleText]=useState(proj.title||"");
-    const [titlePos,setTitlePos]=useState("top"); // top | bottom
-    const [titleStyle,setTitleStyle]=useState("bold_glow"); // bold_glow | elegant | impact
+    const [subtitleText,setSubtitleText]=useState("");
+    const [authorText,setAuthorText]=useState(proj.author||"");
+    const [typographyPlan,setTypographyPlan]=useState(null);
     const fileRef=useRef(null);
     const cs=()=>(proj.characters||[]).map(c=>`${c.name}(${c.role}):${c.desc}`).join("\n");
+    const dataUrlToBlob=async(u)=>{const r=await fetch(u);return await r.blob();};
 
-    // Convert data URL to Blob
-    const dataUrlToBlob=async(dataUrl)=>{const res=await fetch(dataUrl);return await res.blob();};
-
-    // Create mask: transparent where text should go, black where image is preserved
-    const createMask=(width,height,position)=>{
-      const canvas=document.createElement("canvas");
-      canvas.width=width;canvas.height=height;
-      const ctx=canvas.getContext("2d");
-      // Fill entire canvas with BLACK (opaque = preserve original)
-      ctx.fillStyle="rgba(0,0,0,1)";
-      ctx.fillRect(0,0,width,height);
-      // Make title area TRANSPARENT (= area where GPT generates text)
-      ctx.clearRect(0,position==="top"?0:height*0.75,width,height*0.25);
-      return new Promise(resolve=>canvas.toBlob(resolve,"image/png"));
-    };
-
-    // Handle image upload
     const handleUpload=(e)=>{
       const file=e.target.files[0];if(!file)return;
       const reader=new FileReader();
@@ -411,78 +800,100 @@ export default function App() {
       reader.readAsDataURL(file);
     };
 
-    // Generate Novel AI prompt for the illustration (no title text)
+    // Generate Novel AI prompt (no title text in illustration)
     const genNaiPrompt=async(type)=>{
       setLd("Novel AIプロンプト生成中...");
       try{
-        const style=type==="novel"?"colorful anime illustration, vibrant colors, light novel cover art style":"monochrome, greyscale, manga cover, screentone, black and white";
+        const style=type==="novel"?"colorful anime, vibrant":"monochrome, greyscale, manga, screentone";
         const r=await claude("AI画像生成専門家。JSONのみ。バッククォート不要。",
-          `Novel AI用の${type==="novel"?"小説":"漫画"}表紙イラストプロンプトを生成。タイトル文字は含めない（後で別途追加するため）。キャラクターを中央に大きく配置。背景はシンプルに。
+          `Novel AI用の${type==="novel"?"小説":"漫画"}表紙イラストプロンプト。タイトル文字は入れない。キャラ中心の構図。上部または下部にテキストスペースを空ける。
 
 【タイトル】${proj.title}
 【ジャンル】${proj.genre}
 【キャラ】${cs()}
 
-JSON:{
-  "naiPrompt":"Novel AIタグ形式。${style}。キャラ中心の構図。no text, no title含む。positive: ... | negative: bad anatomy, bad hands, ...",
-  "composition":"構図のアドバイス（日本語）",
-  "vibeTransferTip":"Vibe Transfer設定のアドバイス（日本語）"
-}`,2000);
+JSON:{"naiPrompt":"Novel AIタグ形式。${style}。no text, no title, no watermark含む。positive: ... | negative: ...","vibeTransferTip":"Vibe Transfer設定のコツ"}`,2000);
         const p=JSON.parse(r.replace(/```json|```/g,"").trim());
         setNaiPrompt(p.naiPrompt||"");
-        return p;
-      }catch(e){alert(e.message);return null;}
-      finally{setLd("");}
+      }catch(e){alert(e.message);}
+      setLd("");
     };
 
-    // Add title text via GPT Image 2 edit API
-    const addTitleToImage=async()=>{
+    // AI-driven title addition: Claude designs typography → GPT renders
+    const addTitle=async()=>{
       if(!uploadedImg){alert("先にNovel AIで作った画像をアップロードしてください");return;}
       if(!openaiKey){alert("SettingsでOpenAI APIキーを設定してください");return;}
       if(!titleText.trim()){alert("タイトルを入力してください");return;}
 
-      setLd("GPT Image 2でタイトル文字を追加中...(30〜60秒)");
+      setLd("Claudeがタイポグラフィをデザイン中...");
       try{
-        // Get image dimensions
+        // Step 1: Claude analyzes and designs optimal typography
+        const typoResult=await claude("書籍の表紙タイポグラフィデザインの世界的専門家。JSONのみ。バッククォート不要。",
+          `以下の情報に基づいて、${sec==="novel"?"ライトノベル":"漫画"}の表紙に最適なタイポグラフィデザインを設計してください。
+
+【タイトル】${titleText}
+${subtitleText?`【サブタイトル】${subtitleText}`:""}
+${authorText?`【著者名】${authorText}`:""}
+【ジャンル】${proj.genre}
+【表紙タイプ】${sec==="novel"?"カラーのアニメ風":"モノクロの漫画風"}
+
+以下を自動判断してJSON:
+{
+  "titlePosition":"タイトルの配置を具体的に（例：upper center, top left, bottom right, diagonal across top, centered vertically on left side等）",
+  "titleStyle":"フォントスタイルの詳細説明（例：bold gothic with metallic gold gradient and black outline, elegant serif with subtle shadow, dynamic brush stroke style with red accent等）",
+  "titleColor":"メインカラー（例：white with gold gradient, crimson red, deep blue with white outline等）",
+  "titleEffect":"エフェクト（例：outer glow, drop shadow, emboss, none, fire effect, ice crystal等）",
+  "titleSize":"サイズ感（例：very large dominant, medium balanced, large but thin等）",
+  "subtitleStyle":"サブタイトルのスタイル（位置・フォント・色・サイズ）",
+  "authorStyle":"著者名のスタイル（位置・フォント・色・サイズ）",
+  "overallLayout":"全体のレイアウト説明",
+  "gptPrompt":"上記すべてを反映した、GPT Image 2への英語プロンプト。イラスト部分は変更せず、テキスト部分のみ追加する指示。非常に具体的かつ詳細に。300語程度。",
+  "designRationale":"このデザインにした理由（日本語）"
+}
+
+ジャンルの雰囲気に合わせてください。異世界ラブコメなら明るく華やか、ダークファンタジーなら重厚、ホラーなら不気味、コメディならポップに。プロの装丁デザイナーが設計したような仕上がりを目指してください。`,3000);
+
+        const typo=JSON.parse(typoResult.replace(/```json|```/g,"").trim());
+        setTypographyPlan(typo);
+
+        // Step 2: Apply to image via GPT Image 2
+        setLd("GPT Image 2でタイトルを追加中...(30〜60秒)");
         const img=new Image();
         await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;img.src=uploadedImg;});
         const w=img.naturalWidth||1024;const h=img.naturalHeight||1536;
 
-        // Create mask
-        const maskBlob=await createMask(w,h,titlePos);
+        // Create mask based on AI-decided position
+        const canvas=document.createElement("canvas");
+        canvas.width=w;canvas.height=h;
+        const ctx=canvas.getContext("2d");
+        ctx.fillStyle="rgba(0,0,0,1)";
+        ctx.fillRect(0,0,w,h);
+        // Make 30% of the image transparent based on position
+        const pos=typo.titlePosition.toLowerCase();
+        if(pos.includes("bottom")){ctx.clearRect(0,h*0.7,w,h*0.3);}
+        else if(pos.includes("center")&&pos.includes("vertical")){ctx.clearRect(0,h*0.35,w,h*0.3);}
+        else if(pos.includes("diagonal")){ctx.clearRect(0,0,w,h*0.35);}
+        else{ctx.clearRect(0,0,w,h*0.3);} // default: top
+
+        const maskBlob=await new Promise(resolve=>canvas.toBlob(resolve,"image/png"));
         const imgBlob=await dataUrlToBlob(uploadedImg);
 
-        // Style descriptions
-        const styles={
-          bold_glow:"Large bold Japanese text with subtle glow effect, high contrast, easy to read",
-          elegant:"Elegant serif Japanese typography, refined and sophisticated style",
-          impact:"Dynamic impact font, anime/manga style title with dramatic effect"
-        };
-
-        // Send to OpenAI edits API
         const formData=new FormData();
         formData.append("image",imgBlob,"image.png");
         formData.append("mask",maskBlob,"mask.png");
-        formData.append("prompt",`Add professional book title text: "${titleText}" in large stylish Japanese characters. ${styles[titleStyle]}. The text should be ${titlePos==="top"?"at the top":"at the bottom"} of the image. Only add text, do not change the illustration.`);
+        formData.append("prompt",typo.gptPrompt);
         formData.append("model","gpt-image-1");
-        formData.append("size",w>=1024?"1024x1536":"1024x1536");
+        formData.append("size","1024x1536");
 
         const res=await fetch("https://api.openai.com/v1/images/edits",{
-          method:"POST",
-          headers:{"Authorization":`Bearer ${openaiKey}`},
-          body:formData,
+          method:"POST",headers:{"Authorization":`Bearer ${openaiKey}`},body:formData,
         });
-
-        if(!res.ok){
-          const err=await res.text().catch(()=>"");
-          throw new Error(`OpenAI ${res.status}: ${err.substring(0,300)}`);
-        }
-
+        if(!res.ok){const err=await res.text().catch(()=>"");throw new Error(`OpenAI ${res.status}: ${err.substring(0,300)}`);}
         const data=await res.json();
         let resultUrl;
-        if(data.data?.[0]?.b64_json) resultUrl=`data:image/png;base64,${data.data[0].b64_json}`;
-        else if(data.data?.[0]?.url) resultUrl=data.data[0].url;
-        else throw new Error("画像データが返されませんでした");
+        if(data.data?.[0]?.b64_json)resultUrl=`data:image/png;base64,${data.data[0].b64_json}`;
+        else if(data.data?.[0]?.url)resultUrl=data.data[0].url;
+        else throw new Error("画像データなし");
 
         if(sec==="novel"){setFinalImg(resultUrl);updateProj({coverImages:{...(proj.coverImages||{}),novel:resultUrl}});}
         else{setMangaFinalImg(resultUrl);updateProj({coverImages:{...(proj.coverImages||{}),manga:resultUrl}});}
@@ -490,14 +901,21 @@ JSON:{
       setLd("");
     };
 
-    // Fallback: full GPT generation (no upload needed)
+    // Full GPT fallback
     const genFullGpt=async(type)=>{
       if(!openaiKey){alert("SettingsでOpenAI APIキーを設定してください");return;}
       setLd("GPT Image 2で表紙を一括生成中...");
       try{
-        const style=type==="novel"?"vibrant colorful anime":"monochrome manga screentone black and white";
-        const r=await claude("表紙デザイン。JSONのみ。バッククォート不要。",
-          `${type==="novel"?"小説":"漫画"}表紙プロンプト。\n${proj.title}\n${proj.genre}\n${cs()}\nJSON:{"imagePrompt":"Professional ${type==="novel"?"light novel":"manga"} book cover, ${style}, title '${titleText||proj.title}' in large Japanese text at ${titlePos}, main character centered, 1024x1536, professional layout"}`,1500);
+        const r=await claude("表紙デザイン専門家。JSONのみ。バッククォート不要。",
+          `${type==="novel"?"小説":"漫画"}表紙をGPT Image 2で一括生成するための英語プロンプト。タイトル・著者名・デザインすべて含む。
+
+【タイトル】${titleText||proj.title}
+${authorText?`【著者名】${authorText}`:""}
+【ジャンル】${proj.genre}
+【キャラ】${cs()}
+【スタイル】${type==="novel"?"colorful anime light novel":"monochrome manga"}
+
+JSON:{"imagePrompt":"300語の詳細な英語プロンプト。プロの装丁デザイナーレベルのタイポグラフィ指示を含む。1024x1536。"}`,2000);
         const p=JSON.parse(r.replace(/```json|```/g,"").trim());
         setLd("画像生成中...(30〜60秒)");
         const img=await generateImage(openaiKey,p.imagePrompt);
@@ -509,12 +927,10 @@ JSON:{
 
     const dl=(url,suf)=>{const a=document.createElement("a");a.href=url;a.download=`${proj.title}_${suf}.png`;a.click();};
     const currentImg=sec==="novel"?finalImg:mangaFinalImg;
-    const currentType=sec==="novel"?"novel":"manga";
 
     return <>
-      {!openaiKey&&<Card style={{background:`${T.w}10`,border:`1px solid ${T.w}30`}}><div style={{fontSize:13,color:T.w}}>⚠ タイトル文字追加にはOpenAI APIキーが必要 → <span style={{textDecoration:"underline",cursor:"pointer"}} onClick={()=>setTab("settings")}>Settings</span></div></Card>}
+      {!openaiKey&&<Card style={{background:`${T.w}10`,border:`1px solid ${T.w}30`}}><div style={{fontSize:13,color:T.w}}>⚠ タイトル追加にはOpenAI APIキーが必要 → <span style={{textDecoration:"underline",cursor:"pointer"}} onClick={()=>setTab("settings")}>Settings</span></div></Card>}
 
-      {/* Section tabs */}
       <div style={{display:"flex",gap:6,marginBottom:14}}>
         {[{k:"novel",l:"🎨 小説表紙",s:"カラー"},{k:"manga",l:"◈ 漫画表紙",s:"モノクロ"}].map(s=>
           <button key={s.k} onClick={()=>setSec(s.k)} style={{flex:1,padding:"14px",borderRadius:12,cursor:"pointer",background:sec===s.k?(s.k==="novel"?T.p:T.sc)+"15":T.s,border:`1px solid ${sec===s.k?(s.k==="novel"?T.p:T.sc)+"50":T.bd}`,color:sec===s.k?(s.k==="novel"?T.p:T.sc):T.t3,fontSize:14,fontWeight:700,textAlign:"center"}}>
@@ -523,104 +939,79 @@ JSON:{
         )}
       </div>
 
-      {/* ===== STEP 1: Novel AI Prompt Generation ===== */}
+      {/* Step 1: Novel AI Prompt */}
       <Card glow={(sec==="novel"?T.p:T.sc)+"20"}>
         <Label color={T.w}>step 1 — novel ai でイラスト生成</Label>
         <div style={{fontSize:13,color:T.t2,lineHeight:1.7,marginBottom:14}}>
-          Novel AI用のプロンプトを生成します。コピーしてNovel AIでイラストを作成してください。<br/>
-          <span style={{color:T.w,fontWeight:700}}>※ タイトル文字は入れない</span>（Step 2で追加します）
+          プロンプトを生成 → Novel AIでVibe Transfer付きイラストを作成<br/>
+          <span style={{color:T.w}}>※タイトル文字は入れない</span>（Step 2でAIが自動デザイン）
         </div>
         {ld&&ld.includes("プロンプト")?<Loader msg={ld}/>:
-          <Btn onClick={()=>genNaiPrompt(currentType)} disabled={!keysOk} v="secondary" style={{width:"100%",fontSize:13}}>
+          <Btn onClick={()=>genNaiPrompt(sec)} disabled={!keysOk} v="secondary" style={{width:"100%",fontSize:13}}>
             Novel AI用プロンプトを生成
-          </Btn>
-        }
+          </Btn>}
       </Card>
+      {naiPrompt&&<Card glow={T.w+"20"}><div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><Label color={T.w}>novel ai prompt</Label><CopyBtn text={naiPrompt}/></div><Code>{naiPrompt}</Code><div style={{fontSize:12,color:T.t3,marginTop:10}}>↑をNovel AIに貼り付け → 生成後Step 2へ</div></Card>}
 
-      {naiPrompt&&<Card glow={T.w+"20"}>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
-          <Label color={T.w}>novel ai prompt — コピーして使用</Label>
-          <CopyBtn text={naiPrompt}/>
-        </div>
-        <Code>{naiPrompt}</Code>
-        <div style={{fontSize:12,color:T.t3,marginTop:10,lineHeight:1.6}}>
-          ↑をNovel AIに貼り付けてイラストを生成 → Vibe Transferでキャラ固定推奨<br/>
-          生成後、画像を下のStep 2でアップロードしてください
-        </div>
-      </Card>}
-
-      {/* ===== STEP 2: Upload + Add Title ===== */}
+      {/* Step 2: Upload + AI Typography */}
       <Card>
-        <Label color={T.ok}>step 2 — 画像アップロード＋タイトル追加</Label>
+        <Label color={T.ok}>step 2 — ai自動タイポグラフィ</Label>
         <div style={{fontSize:13,color:T.t2,lineHeight:1.7,marginBottom:14}}>
-          Novel AIで作ったイラストをアップロードし、GPT Image 2でタイトル文字を追加します。
+          画像をアップロードするだけ。フォント・色・位置・エフェクトは<span style={{color:T.ok,fontWeight:700}}>AIがジャンルに合わせて全自動でデザイン</span>します。
         </div>
 
         {/* Upload */}
-        <div style={{padding:16,background:T.s2,borderRadius:12,border:`1px solid ${T.bd}`,marginBottom:12,textAlign:"center"}}>
+        <div style={{padding:16,background:T.s2,borderRadius:12,border:`1px solid ${T.bd}`,marginBottom:12}}>
           <input ref={fileRef} type="file" accept="image/*" onChange={handleUpload} style={{display:"none"}}/>
           <Btn v="secondary" onClick={()=>fileRef.current?.click()} style={{width:"100%",fontSize:13}}>
-            {uploadedImg?"✓ 画像をアップロード済み — 変更する":"Novel AIの画像をアップロード"}
+            {uploadedImg?"✓ 画像アップロード済み — 変更する":"Novel AIの画像をアップロード"}
           </Btn>
-          {uploadedImg&&<div style={{marginTop:12}}><img src={uploadedImg} alt="" style={{maxWidth:"100%",maxHeight:300,borderRadius:10,border:`1px solid ${T.bd}`}}/></div>}
+          {uploadedImg&&<div style={{marginTop:12,textAlign:"center"}}><img src={uploadedImg} alt="" style={{maxWidth:"100%",maxHeight:280,borderRadius:10,border:`1px solid ${T.bd}`}}/></div>}
         </div>
 
-        {/* Title settings */}
+        {/* Text inputs */}
         <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
-          <div>
-            <div style={{fontSize:12,color:T.t3,marginBottom:6}}>タイトルテキスト</div>
-            <Input value={titleText} onChange={e=>setTitleText(e.target.value)} placeholder="タイトルを入力..."/>
-          </div>
-          <div style={{display:"flex",gap:8}}>
-            <div style={{flex:1}}>
-              <div style={{fontSize:12,color:T.t3,marginBottom:6}}>位置</div>
-              <div style={{display:"flex",gap:4}}>
-                {[{k:"top",l:"上部"},{k:"bottom",l:"下部"}].map(p=>
-                  <button key={p.k} onClick={()=>setTitlePos(p.k)} style={{flex:1,padding:"8px",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",background:titlePos===p.k?T.p+"20":"transparent",color:titlePos===p.k?T.p:T.t3,border:`1px solid ${titlePos===p.k?T.p+"40":T.bd}`}}>{p.l}</button>
-                )}
-              </div>
-            </div>
-            <div style={{flex:1}}>
-              <div style={{fontSize:12,color:T.t3,marginBottom:6}}>スタイル</div>
-              <div style={{display:"flex",gap:4}}>
-                {[{k:"bold_glow",l:"太字"},{k:"elegant",l:"優雅"},{k:"impact",l:"迫力"}].map(s=>
-                  <button key={s.k} onClick={()=>setTitleStyle(s.k)} style={{flex:1,padding:"8px",borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer",background:titleStyle===s.k?T.sc+"20":"transparent",color:titleStyle===s.k?T.sc:T.t3,border:`1px solid ${titleStyle===s.k?T.sc+"40":T.bd}`}}>{s.l}</button>
-                )}
-              </div>
-            </div>
-          </div>
+          <div><div style={{fontSize:12,color:T.t3,marginBottom:4}}>タイトル</div><Input value={titleText} onChange={e=>setTitleText(e.target.value)} placeholder="メインタイトル"/></div>
+          <div><div style={{fontSize:12,color:T.t3,marginBottom:4}}>サブタイトル（任意）</div><Input value={subtitleText} onChange={e=>setSubtitleText(e.target.value)} placeholder="巻タイトルなど"/></div>
+          <div><div style={{fontSize:12,color:T.t3,marginBottom:4}}>著者名（任意）</div><Input value={authorText} onChange={e=>setAuthorText(e.target.value)} placeholder="ペンネーム"/></div>
         </div>
 
-        {/* Generate button */}
+        {/* Generate */}
         {ld&&!ld.includes("プロンプト")?<Loader msg={ld}/>:
-          <Btn onClick={addTitleToImage} disabled={!uploadedImg||!openaiKey} style={{width:"100%",padding:"14px",fontSize:14,background:`linear-gradient(135deg,${T.ok},#2dd4bf)`}}>
-            ⚡ GPT Image 2 でタイトルを追加
-          </Btn>
-        }
+          <Btn onClick={addTitle} disabled={!uploadedImg||!openaiKey||!titleText.trim()} style={{width:"100%",padding:"16px",fontSize:15,background:`linear-gradient(135deg,${T.ok},#2dd4bf)`}}>
+            ⚡ AIにお任せ — タイトルを自動デザイン
+          </Btn>}
       </Card>
 
-      {/* ===== Alternative: Full GPT generation ===== */}
-      <Card>
-        <Label color={T.t3}>または — gpt image 2 で一括生成</Label>
-        <div style={{fontSize:12,color:T.t3,lineHeight:1.6,marginBottom:12}}>
-          Novel AIを使わず、GPT Image 2だけで表紙を作ることもできます（キャラ一貫性は低下）
+      {/* Typography Plan */}
+      {typographyPlan&&<Card>
+        <Label color={T.t3}>ai typography design</Label>
+        <div style={{fontSize:13,color:T.t2,lineHeight:1.8}}>
+          <div style={{marginBottom:8}}><span style={{color:T.p,fontWeight:700}}>配置:</span> {typographyPlan.titlePosition}</div>
+          <div style={{marginBottom:8}}><span style={{color:T.sc,fontWeight:700}}>スタイル:</span> {typographyPlan.titleStyle}</div>
+          <div style={{marginBottom:8}}><span style={{color:T.w,fontWeight:700}}>カラー:</span> {typographyPlan.titleColor}</div>
+          <div style={{marginBottom:8}}><span style={{color:T.ok,fontWeight:700}}>エフェクト:</span> {typographyPlan.titleEffect}</div>
+          {typographyPlan.designRationale&&<div style={{marginTop:8,padding:12,background:T.s2,borderRadius:10,border:`1px solid ${T.bd}`}}><span style={{fontWeight:700,color:T.w}}>デザイン理由: </span>{typographyPlan.designRationale}</div>}
         </div>
-        {ld?null:<Btn v="ghost" onClick={()=>genFullGpt(currentType)} disabled={!keysOk} style={{width:"100%",fontSize:12}}>
-          GPT Image 2で{sec==="novel"?"小説":"漫画"}表紙を一括生成
-        </Btn>}
+      </Card>}
+
+      {/* Fallback */}
+      <Card><Label color={T.t3}>または — gpt image 2 で一括生成</Label>
+        <div style={{fontSize:12,color:T.t3,marginBottom:10}}>Novel AIを使わず全部GPTに任せる（キャラ一貫性は低下）</div>
+        {!ld&&<Btn v="ghost" onClick={()=>genFullGpt(sec)} disabled={!keysOk} style={{width:"100%",fontSize:12}}>GPTで一括生成</Btn>}
       </Card>
 
-      {/* ===== Result ===== */}
+      {/* Result */}
       {currentImg&&<Card glow={T.ok+"20"}>
-        <Label color={T.ok}>完成した{sec==="novel"?"小説":"漫画"}表紙</Label>
+        <Label color={T.ok}>完成した表紙</Label>
         <div style={{display:"flex",justifyContent:"center",marginBottom:14}}>
           <div style={{borderRadius:12,overflow:"hidden",border:`1px solid ${T.bd}`,maxWidth:320,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
             <img src={currentImg} alt="cover" style={{width:"100%",display:"block"}}/>
           </div>
         </div>
-        <div style={{display:"flex",gap:8,justifyContent:"center"}}>
-          <Btn v="success" style={{fontSize:12}} onClick={()=>dl(currentImg,currentType)}>ダウンロード</Btn>
-          <Btn v="ghost" style={{fontSize:12}} onClick={()=>{if(uploadedImg)addTitleToImage();else genFullGpt(currentType);}}>再生成</Btn>
+        <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+          <Btn v="success" style={{fontSize:12}} onClick={()=>dl(currentImg,sec)}>ダウンロード</Btn>
+          <Btn v="ghost" style={{fontSize:12}} onClick={()=>{if(uploadedImg)addTitle();else genFullGpt(sec);}}>再生成</Btn>
         </div>
       </Card>}
     </>;
