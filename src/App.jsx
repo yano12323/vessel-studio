@@ -120,6 +120,8 @@ export default function App() {
   const genAbort=useRef(false);
 
   const proj=projects.find(p=>p.id===activeId)||null;
+  // Safe string conversion for AI responses that might be objects
+  const toStr=(v)=>typeof v==="object"&&v!==null?Object.entries(v).map(([k,val])=>`${k}: ${val}`).join("\n"):String(v||"");
   const updateProj=(upd)=>{setProjects(prev=>{const next=prev.map(p=>p.id===activeId?{...p,...upd}:p);sSet(SK.proj,next);return next;});};
   const sv=(ps,id)=>{sSet(SK.proj,ps);sSet(SK.active,id);};
 
@@ -641,9 +643,9 @@ dialogueとsfxは必ず含めること（なければ空文字""）。
           {data.characterSheets.map((cs,i)=>
             <div key={i} style={{padding:"14px 0",borderBottom:i<data.characterSheets.length-1?`1px solid ${T.bd}`:"none"}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-                <span style={{fontWeight:700,color:T.tx}}>{cs.name}</span><CopyBtn text={cs.novelaiPrompt}/>
+                <span style={{fontWeight:700,color:T.tx}}>{cs.name}</span><CopyBtn text={toStr(cs.novelaiPrompt)}/>
               </div>
-              <Code>{cs.novelaiPrompt}</Code>
+              <Code>{toStr(cs.novelaiPrompt)}</Code>
             </div>
           )}
         </Card>}
@@ -655,10 +657,10 @@ dialogueとsfxは必ず含めること（なければ空文字""）。
               <div key={pn.panelNum} style={{background:T.s2,borderRadius:10,padding:12,marginBottom:6,border:`1px solid ${T.bd}`}}>
                 <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
                   <div style={{display:"flex",gap:6}}><Pill>{pn.panelNum}</Pill><Pill color={T.t3}>{pn.size}</Pill></div>
-                  <CopyBtn text={pn.novelaiPrompt}/>
+                  <CopyBtn text={toStr(pn.novelaiPrompt)}/>
                 </div>
                 <div style={{fontSize:12,color:T.t2,marginBottom:4}}>{pn.description}</div>
-                <Code>{pn.novelaiPrompt}</Code>
+                <Code>{toStr(pn.novelaiPrompt)}</Code>
                 {pn.dialogue&&<div style={{color:T.sc,marginTop:8,fontSize:13}}>💬「{pn.dialogue}」</div>}
                 {pn.sfx&&<div style={{color:T.w,marginTop:4,fontSize:12}}>SFX: {pn.sfx}</div>}
               </div>
@@ -814,7 +816,7 @@ dialogueとsfxは必ず含めること（なければ空文字""）。
 
 JSON:{"naiPrompt":"Novel AIタグ形式。${style}。no text, no title, no watermark含む。positive: ... | negative: ...","vibeTransferTip":"Vibe Transfer設定のコツ"}`,2000);
         const p=JSON.parse(r.replace(/```json|```/g,"").trim());
-        setNaiPrompt(p.naiPrompt||"");
+        setNaiPrompt(typeof p.naiPrompt==="object"?Object.entries(p.naiPrompt).map(([k,v])=>`${k}: ${v}`).join("\n"):p.naiPrompt||"");
       }catch(e){alert(e.message);}
       setLd("");
     };
