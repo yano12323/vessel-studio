@@ -78,7 +78,7 @@ const GENRES = ["異世界ラブコメ","異世界ファンタジー","現代ラ
 const T = { bg:"#111118",s:"#191922",s2:"#1e1e2a",bd:"#2a2a3a",tx:"#eaeaf0",t2:"#a0a0b4",t3:"#6a6a80",p:"#6c8cff",sc:"#ff6c9d",ok:"#4cd9a0",w:"#ffb347",mono:"'IBM Plex Mono',monospace",body:"'Noto Sans JP',sans-serif" };
 
 /* ═══ Components ═══ */
-const Card = ({children,style,glow}) => <div style={{background:T.s,border:`1px solid ${T.bd}`,borderRadius:16,padding:"22px 20px",marginBottom:14,overflow:"hidden",...(glow?{boxShadow:`0 0 40px -10px ${glow}`}:{}),...style}}>{children}</div>;
+const Card = ({children,style,glow,onClick}) => <div onClick={onClick} style={{background:T.s,border:`1px solid ${T.bd}`,borderRadius:16,padding:"22px 20px",marginBottom:14,overflow:"hidden",...(glow?{boxShadow:`0 0 40px -10px ${glow}`}:{}),...style}}>{children}</div>;
 const Label = ({children,color=T.p}) => <div style={{fontSize:11,fontWeight:700,color,letterSpacing:"0.12em",textTransform:"uppercase",fontFamily:T.mono,marginBottom:12}}>{children}</div>;
 const H = ({children}) => <h3 style={{fontSize:17,fontWeight:800,color:T.tx,margin:"0 0 4px 0",letterSpacing:"-0.02em"}}>{children}</h3>;
 const Pill = ({children,color=T.p}) => <span style={{display:"inline-block",fontSize:11,fontWeight:700,color,background:color+"15",padding:"3px 11px",borderRadius:99,border:`1px solid ${color}30`}}>{children}</span>;
